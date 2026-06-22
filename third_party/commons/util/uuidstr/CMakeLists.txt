@@ -1,0 +1,12 @@
+add_library(commons-uuidstr uuidstr.c)
+target_include_directories(commons-uuidstr PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+    target_link_libraries(commons-uuidstr PUBLIC rpcrt4)
+    target_sources(commons-uuidstr PRIVATE uuidstr_win32.c)
+else ()
+    pkg_check_modules(UUID REQUIRED uuid)
+    target_include_directories(commons-uuidstr SYSTEM PRIVATE ${UUID_INCLUDE_DIRS})
+    target_link_libraries(commons-uuidstr PUBLIC ${UUID_LIBRARIES})
+    target_sources(commons-uuidstr PRIVATE uuidstr_libuuid.c)
+endif ()

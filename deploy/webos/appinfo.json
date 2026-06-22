@@ -1,0 +1,16 @@
+{
+    "id": "@WEBOS_APPINFO_ID@",
+    "version": "0.1.0",
+    "vendor": "Eduard Gotwig",
+    "type": "native",
+    "main": "bin/scrcpy",
+    "title": "ADB.webOS",
+    "icon": "icon.png",
+    "iconColor": "#ffffff",
+    "largeIcon": "icon_large.png",
+    "splashBackground": "splash.png",
+    "dialAppName": "ADB.webOS",
+    "appDescription": "Open Source ADB/Scrcpy client to access your android phone",
+    "supportTouchMode": "full",
+    "useAllMouseButtons": true
+}

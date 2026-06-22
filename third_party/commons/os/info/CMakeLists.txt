@@ -1,0 +1,17 @@
+add_library(commons-os-info os_info.c)
+target_include_directories(commons-os-info PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(commons-os-info PUBLIC commons-version-info)
+
+include(CheckSymbolExists)
+check_symbol_exists(uname "sys/utsname.h" HAS_UNAME)
+
+if (TARGET commons-luna-sync)
+    pkg_check_modules(PBNJSON_C REQUIRED pbnjson_c)
+    target_sources(commons-os-info PRIVATE os_info_webos.c)
+    target_include_directories(commons-os-info SYSTEM PRIVATE ${PBNJSON_C_INCLUDE_DIRS})
+    target_link_libraries(commons-os-info PUBLIC commons-luna-sync ${PBNJSON_C_LIBRARIES})
+elseif (HAS_UNAME)
+    target_sources(commons-os-info PRIVATE os_info_uname.c)
+else ()
+    target_sources(commons-os-info PRIVATE os_info_generic.c)
+endif ()

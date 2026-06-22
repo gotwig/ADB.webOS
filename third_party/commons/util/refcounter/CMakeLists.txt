@@ -1,0 +1,10 @@
+add_library(commons-refcounter INTERFACE)
+target_include_directories(commons-refcounter INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
+if (CMAKE_TESTING_ENABLED)
+    pkg_check_modules(SDL2 REQUIRED sdl2)
+    add_executable(tests_refcounter refcounter_tests.c)
+    target_include_directories(tests_refcounter SYSTEM PRIVATE ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(tests_refcounter PRIVATE commons-refcounter ${SDL2_LIBRARIES})
+    add_test(tests_refcounter tests_refcounter)
+endif ()

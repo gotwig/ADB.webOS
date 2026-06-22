@@ -1,0 +1,19 @@
+target_sources(moonlight-lib PRIVATE
+        root.c
+        ui_input.c
+        fatal_error.c
+        launcher/launcher.view.c
+        launcher/launcher.controller.c
+        launcher/apps.controller.c
+        launcher/add.dialog.c
+        launcher/pair.dialog.c
+        launcher/appitem.view.c
+        launcher/server.context_menu.c
+        launcher/coverloader.c
+        streaming/streaming.view.c
+        streaming/streaming.controller.c
+        streaming/hints.c
+        help/help.dialog.c
+        common/progress_dialog.c
+        )
+add_subdirectory(settings)

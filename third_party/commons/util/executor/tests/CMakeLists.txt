@@ -1,0 +1,7 @@
+add_executable(test_executor_multi_threads test_executor_multi_threads.c)
+target_link_libraries(test_executor_multi_threads PRIVATE commons-executor commons-logging)
+add_test(test_executor_multi_threads test_executor_multi_threads)
+
+add_executable(test_executor_single_thread test_executor_single_thread.c)
+target_link_libraries(test_executor_single_thread PRIVATE commons-executor commons-logging)
+add_test(test_executor_single_thread test_executor_single_thread)
