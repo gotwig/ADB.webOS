@@ -1,23 +1,19 @@
 # ADB.webOS
-
 Screencast your Android device's video and audio directly to your webOS TV using ADB and Scrcpy over USB.
 
 ADB.webOS brings native Android debugging tools and low-latency Android screencasting to webOS, allowing you to view and troubleshoot Android devices directly from your TV.
 
-> **Note:** Screenshots and additional setup guides will be added in a future release.
-
 ## Features
-
 - High-performance Android video and audio screencasting over USB (in the near future wireless adb is planned)
 - Native `adb` binary included for debugging, shell access, and device management
 - Supports Android 11 through Android 16
 - Low-latency USB connection with no network setup required
 - Works with Android devices that have Developer Options and USB debugging enabled
 
+<img width="1280" height="720" alt="screenshot-adb-webos" src="https://github.com/user-attachments/assets/527f5613-a7b9-43be-9162-e26da49e8447" />
+
 ## Requirements
-
 ### Android Device
-
 - Android 11–16
 - Developer Options enabled
 - USB debugging enabled
