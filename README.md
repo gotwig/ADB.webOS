@@ -1,5 +1,8 @@
 # ADB.webOS
-Say 'Hello' to this guy visiting your LG TV <img width="200" height="200" alt="android mascot" src="https://github.com/user-attachments/assets/046bf530-0ce8-4804-9561-ec9860cd9313" /> 
+<img width="100" height="100" alt="android mascot" src="https://github.com/user-attachments/assets/046bf530-0ce8-4804-9561-ec9860cd9313" /> 
+
+Say 'Hello' to this green guy visiting your rooted LG TV:
+
 ADB.webOS offers low-latency screencasts and ADB access to your android devices.
 
 ## Features
