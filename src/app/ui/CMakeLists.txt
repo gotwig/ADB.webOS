@@ -6,6 +6,7 @@ target_sources(moonlight-lib PRIVATE
         launcher/launcher.controller.c
         launcher/apps.controller.c
         launcher/add.dialog.c
+        launcher/wireless.c
         launcher/pair.dialog.c
         launcher/appitem.view.c
         launcher/server.context_menu.c
@@ -17,3 +18,8 @@ target_sources(moonlight-lib PRIVATE
         common/progress_dialog.c
         )
 add_subdirectory(settings)
+# Wireless ADB discovery also uses microdns on platforms with DNS-SD.
+if (NOT TARGET microdns)
+    include(BuildMicrodns)
+endif ()
+target_link_libraries(moonlight-lib PUBLIC microdns)

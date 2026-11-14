@@ -150,6 +150,12 @@ void lv_group_remove_all_objs(lv_group_t * group);
 void lv_group_focus_obj(struct _lv_obj_t * obj);
 
 /**
+ * Clear the focused object without removing the group's objects
+ * @param group     pointer to a group
+ */
+void lv_group_clear_focus(lv_group_t * group);
+
+/**
  * Focus the next object in a group (defocus the current)
  * @param group     pointer to a group
  */

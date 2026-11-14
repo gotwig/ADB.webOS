@@ -195,6 +195,7 @@ bool ui_dispatch_userevent(app_t *app, int which, void *data1, void *data2) {
             case USER_STREAM_FINISHED: {
                 if (streaming_errno != 0) {
                     session_error();
+                    launcher_show_wireless_error(streaming_errmsg);
                     break;
                 }
                 return true;

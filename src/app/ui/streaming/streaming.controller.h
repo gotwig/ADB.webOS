@@ -4,6 +4,7 @@
 
 #include "client.h"
 #include "stream/session.h"
+#include "app_session.h"
 
 typedef struct app_t app_t;
 
@@ -42,6 +43,7 @@ typedef struct {
     app_t *global;
     uuidstr_t uuid;
     APP_LIST app;
+    scrcpy_connection_t scrcpy_connection;
 } streaming_scene_arg_t;
 
 extern const lv_fragment_class_t streaming_controller_class;

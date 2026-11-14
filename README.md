@@ -6,7 +6,8 @@ Say 'Hello' to this green guy visiting your rooted LG TV:
 ADB.webOS offers low-latency screencasts and ADB access to your android devices.
 
 ## Features
-- High-performance Android video and audio screencasting over USB (in the near future wireless adb is planned)
+- High-performance Android video and audio screencasting over USB or wireless ADB
+- Wireless ADB pairing by scanning a QR code from Android's Wireless debugging settings
 - Native `adb` binary included for debugging, shell access, and device management
 - Supports Android 11 through Android 16
 - Low-latency USB connection with no network setup required
@@ -37,6 +38,15 @@ Download the latest IPK package from the **Releases** page.
 5. Accept the USB debugging authorization prompt on your Android device if prompted.
 
 Your Android device should now be screencasting to the TV.
+
+### Wireless Pairing
+
+1. Enable **Wireless debugging** in the android device's Developer Options.
+2. Connect the phone and TV to the same Wi-Fi network.
+3. In ADB.webOS, choose **Pair device via QR**.
+4. On the phone, choose **Pair device with QR code** under Wireless debugging and scan the TV.
+
+ADB.webOS pairs with the phone and starts the wireless screencast.
 
 ## Using ADB from the Terminal
 

@@ -5,6 +5,12 @@
 #include "errors.h"
 #include "util/i18n.h"
 #include "ui/root.h"
+#include "ui/streaming/streaming.controller.h"
+
+#include <arpa/inet.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 typedef struct {
     lv_fragment_t base;

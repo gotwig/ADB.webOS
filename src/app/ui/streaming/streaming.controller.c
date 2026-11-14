@@ -129,7 +129,7 @@ static void constructor(lv_fragment_t *self, void *args) {
     const streaming_scene_arg_t *arg = (streaming_scene_arg_t *) args;
     controller->global = arg->global;
     if (arg->app.id == -999) {
-        app_session_begin_scrcpy(arg->global);
+        app_session_begin_scrcpy(arg->global, &arg->scrcpy_connection);
     } else {
         app_session_begin(arg->global, &arg->uuid, &arg->app);
     }

@@ -8,8 +8,10 @@
 #include "util/user_event.h"
 #include "input/input_gamepad.h"
 #include "app_session.h"
+#include "adb_devices.h"
 #include "ss4s.h"
 #include "sps_parser.h"
+#include <microdns/microdns.h>
 
 #ifdef TARGET_WEBOS
 #include "lunasynccall.h"
@@ -46,6 +48,210 @@ static void scrcpy_log(const char *fmt, ...) {
     if (f) {
         fprintf(f, "%s\n", buf);
         fclose(f);
+    }
+}
+
+static bool wifi_ip_from_usb(const char *adb_opts, char *ip, size_t ip_size) {
+    char command[512], line[256], candidate[INET_ADDRSTRLEN];
+    struct in_addr parsed;
+    snprintf(command, sizeof(command), "%s -d shell ip route", adb_opts);
+    FILE *output = popen(command, "r");
+    if (output) {
+        while (fgets(line, sizeof(line), output)) {
+            const char *source = strstr(line, "src ");
+            if (source && strstr(line, "wlan") &&
+                sscanf(source + 4, "%15[0-9.]", candidate) == 1 &&
+                inet_pton(AF_INET, candidate, &parsed) == 1) {
+                snprintf(ip, ip_size, "%s", candidate);
+                pclose(output);
+                return true;
+            }
+        }
+        pclose(output);
+    }
+    snprintf(command, sizeof(command), "%s -d shell getprop dhcp.wlan0.ipaddress", adb_opts);
+    output = popen(command, "r");
+    if (output) {
+        bool found = fgets(line, sizeof(line), output) &&
+                     sscanf(line, "%15[0-9.]", candidate) == 1 &&
+                     inet_pton(AF_INET, candidate, &parsed) == 1;
+        pclose(output);
+        if (found) {
+            snprintf(ip, ip_size, "%s", candidate);
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool is_ipv4_endpoint(const char *endpoint) {
+    char address[INET_ADDRSTRLEN];
+    struct in_addr parsed;
+    const char *colon = strchr(endpoint, ':');
+    if (!colon || strchr(colon + 1, ':') || (size_t)(colon - endpoint) >= sizeof(address)) return false;
+    memcpy(address, endpoint, (size_t)(colon - endpoint));
+    address[colon - endpoint] = '\0';
+    char *end;
+    unsigned long port = strtoul(colon + 1, &end, 10);
+    return inet_pton(AF_INET, address, &parsed) == 1 &&
+           colon[1] && *end == '\0' && port > 0 && port <= 65535;
+}
+
+typedef struct {
+    session_t *session;
+    struct in_addr pairing_ip;
+    Uint32 started;
+    char endpoint[64];
+} adb_qr_discovery_t;
+
+static bool adb_qr_discovery_stop(void *data) {
+    adb_qr_discovery_t *discovery = data;
+    return discovery->endpoint[0] || discovery->session->interrupted ||
+           SDL_GetTicks() - discovery->started >= 30000;
+}
+
+static void adb_qr_discovery_received(void *data, int status, const struct rr_entry *entries) {
+    adb_qr_discovery_t *discovery = data;
+    if (status < 0) return;
+
+    for (const struct rr_entry *entry = entries; entry; entry = entry->next) {
+        if (entry->type == RR_SRV && entry->ttl && entry->data.SRV.port &&
+            strstr(entry->name, "._adb-tls-connect._tcp.local")) {
+            for (const struct rr_entry *address = entries; address; address = address->next) {
+                if (address->type != RR_A ||
+                    strcmp(address->name, entry->data.SRV.target) ||
+                    address->data.A.addr.s_addr != discovery->pairing_ip.s_addr) continue;
+                snprintf(discovery->endpoint, sizeof(discovery->endpoint), "%s:%u",
+                         address->data.A.addr_str, entry->data.SRV.port);
+                return;
+            }
+        }
+    }
+}
+
+static bool adb_qr_discover_connect_endpoint(session_t *session, const char *pair_endpoint,
+                                             char *endpoint, size_t endpoint_size) {
+    char ip[INET_ADDRSTRLEN], extra;
+    unsigned port;
+    struct sockaddr_in pairing_address = {.sin_family = AF_INET};
+    if (sscanf(pair_endpoint, "%15[0-9.]:%u%c", ip, &port, &extra) != 2 ||
+        !port || port > 65535 ||
+        inet_pton(AF_INET, ip, &pairing_address.sin_addr) != 1) return false;
+
+    adb_qr_discovery_t discovery = {
+        .session = session,
+        .pairing_ip = pairing_address.sin_addr,
+        .started = SDL_GetTicks(),
+    };
+    struct mdns_ctx *ctx = NULL;
+    const char *services[] = {"_adb-tls-connect._tcp.local"};
+    int result = mdns_init(&ctx, NULL, MDNS_PORT);
+    if (result < 0) return false;
+    result = mdns_listen(ctx, services, 1, RR_PTR, 2, adb_qr_discovery_stop,
+                         adb_qr_discovery_received, &discovery);
+    mdns_destroy(ctx);
+    if (result < 0 || !discovery.endpoint[0] || session->interrupted) return false;
+    snprintf(endpoint, endpoint_size, "%s", discovery.endpoint);
+    return true;
+}
+
+static bool adb_connect_endpoint(const char *adb_opts, const char *endpoint) {
+    if (!is_ipv4_endpoint(endpoint)) return false;
+    char command[512], line[256];
+    snprintf(command, sizeof(command), "%s connect %s > /tmp/adb_connect.txt 2>&1", adb_opts, endpoint);
+    int result = system(command);
+    bool connected = false;
+    FILE *log = fopen("/tmp/adb_connect.txt", "r");
+    if (log) {
+        while (fgets(line, sizeof(line), log)) {
+            if (strstr(line, "connected to") || strstr(line, "already connected")) connected = true;
+            scrcpy_log("ADB connect: %s", line);
+        }
+        fclose(log);
+    }
+    return result == 0 && connected;
+}
+
+static bool adb_value(const char *adb_opts, const char *transport_opts, const char *query,
+                      char *value, size_t size) {
+    char command[768];
+    snprintf(command, sizeof(command), "%s %s %s 2>/dev/null", adb_opts, transport_opts, query);
+    FILE *output = popen(command, "r");
+    if (!output) return false;
+    bool read = fgets(value, size, output) != NULL;
+    int result = pclose(output);
+    if (!read || result != 0) { value[0] = 0; return false; }
+    value[strcspn(value, "\r\n")] = 0;
+    for (char *ch = value; *ch; ++ch) if ((unsigned char) *ch < 32) *ch = ' ';
+    return value[0] && strcmp(value, "null") && strcmp(value, "unknown");
+}
+
+static bool usb_value(const char *adb_opts, const char *query, char *value, size_t size) {
+    return adb_value(adb_opts, "-d", query, value, size);
+}
+
+static void remember_usb_phone(session_t *session, const char *adb_opts) {
+    app_t *app = session->app;
+    adb_device_t device = {0};
+    char ip[INET_ADDRSTRLEN];
+    if (!usb_value(adb_opts, "get-serialno", device.serial, sizeof(device.serial))) return;
+    if (!usb_value(adb_opts, "shell settings get global device_name", device.name, sizeof(device.name)) &&
+        !usb_value(adb_opts, "shell getprop ro.product.model", device.name, sizeof(device.name))) {
+        snprintf(device.name, sizeof(device.name), "android device");
+    }
+    if (!wifi_ip_from_usb(adb_opts, ip, sizeof(ip))) {
+        scrcpy_log("Phone has no Wi-Fi address; continuing cable casting without wireless setup.");
+        return;
+    }
+    /* Avoid restarting adbd again when wireless access is already enabled. */
+    char port[32];
+    bool enabled = usb_value(adb_opts, "shell getprop service.adb.tcp.port", port, sizeof(port)) && !strcmp(port, "5555");
+    if (!enabled) {
+        char command[768];
+        snprintf(command, sizeof(command), "%s -d tcpip 5555 > /tmp/adb_tcpip.txt 2>&1", adb_opts);
+        if (system(command) != 0) {
+            scrcpy_log("Could not enable future wireless access; continuing USB casting.");
+            return;
+        }
+        /* adbd restarts to enable its TCP listener. Resume specifically over USB. */
+        enabled = false;
+        SDL_Delay(1000);
+        for (int attempt = 0; attempt < 10 && !session->interrupted; ++attempt) {
+            char state[32];
+            if (usb_value(adb_opts, "get-state", state, sizeof(state)) && !strcmp(state, "device")) {
+                enabled = true;
+                break;
+            }
+            SDL_Delay(500);
+        }
+    }
+    if (!enabled || session->interrupted) return;
+    snprintf(device.endpoint, sizeof(device.endpoint), "%s:5555", ip);
+    if (app->settings.conf_persistent && adb_devices_remember(app->settings.conf_dir, &device) == 0) {
+        scrcpy_log("Remembered %s for future wireless casting; current casting remains USB.", device.name);
+    }
+}
+
+static void remember_wireless_phone(session_t *session, const char *adb_opts, const char *endpoint) {
+    app_t *app = session->app;
+    if (!app->settings.conf_persistent || !app->settings.conf_dir || !app->settings.conf_dir[0]) return;
+
+    adb_device_t device = {0};
+    char transport_opts[96];
+    snprintf(transport_opts, sizeof(transport_opts), "-s %s", endpoint);
+    if (!adb_value(adb_opts, transport_opts, "get-serialno", device.serial, sizeof(device.serial))) {
+        scrcpy_log("Could not read the paired phone's ADB serial; wireless pairing will not be remembered.");
+        return;
+    }
+    snprintf(device.endpoint, sizeof(device.endpoint), "%s", endpoint);
+    if (!adb_value(adb_opts, transport_opts, "shell settings get global device_name",
+                   device.name, sizeof(device.name)) &&
+        !adb_value(adb_opts, transport_opts, "shell getprop ro.product.model",
+                   device.name, sizeof(device.name))) {
+        snprintf(device.name, sizeof(device.name), "android device");
+    }
+    if (adb_devices_remember(app->settings.conf_dir, &device) != 0) {
+        scrcpy_log("Could not remember paired wireless phone %s.", device.name);
     }
 }
 
@@ -340,6 +546,8 @@ int session_worker(session_t *session) {
     char adb_opts[256];
     scrcpy_log("Explicit loopback server binding configuration (-H 127.0.0.1 -P 5037) enabled");
     snprintf(adb_opts, sizeof(adb_opts), "%s -H 127.0.0.1 -P 5037", adb);
+    scrcpy_connection_t *connection = &session->scrcpy_connection;
+    char transport_opts[160] = "-d";
 
     // Let's check socket existence on host loopback 5037 directly 
     int test_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -474,14 +682,70 @@ int session_worker(session_t *session) {
         scrcpy_log("ADB server is verified ready and responding.");
     }
 
-    // Step 0: Robust check for connected USB (wired ADB) device
-    scrcpy_log("Checking for connected USB (wired ADB) devices...");
+    if (session->interrupted) goto thread_cleanup;
+
+    // Pair and connect only after the same ADB server and keys used by scrcpy are ready.
+    if (connection->serial[0] || connection->mode == SCRCPY_ADB_QR) {
+        size_t code_length = strlen(connection->pair_code);
+        if ((connection->serial[0] &&
+             strspn(connection->serial, "0123456789.:_-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") !=
+             strlen(connection->serial)) ||
+            (connection->pair_endpoint[0] &&
+             (!is_ipv4_endpoint(connection->pair_endpoint) || code_length != 6 ||
+              strspn(connection->pair_code, "0123456789") != code_length)) ||
+            (connection->mode == SCRCPY_ADB_QR &&
+             (!connection->pair_endpoint[0] || code_length != 6 ||
+              strspn(connection->pair_code, "0123456789") != code_length))) {
+            session_interrupt(session, false, STREAMING_INTERRUPT_ERROR);
+            streaming_error(session, GS_WRONG_STATE, "Invalid wireless ADB address or pairing code.");
+            session_set_state(session, STREAMING_ERROR);
+            goto thread_cleanup;
+        }
+        if (connection->pair_endpoint[0]) {
+            scrcpy_log("Pairing wireless ADB device at %s...", connection->pair_endpoint);
+            snprintf(cmd, sizeof(cmd), "%s pair %s %s > /tmp/adb_pair.txt 2>&1",
+                     adb_opts, connection->pair_endpoint, connection->pair_code);
+            if (system(cmd) != 0) {
+                session_interrupt(session, false, STREAMING_INTERRUPT_ERROR);
+                streaming_error(session, GS_WRONG_STATE,
+                                "Wireless ADB pairing failed. Check the pairing port and six-digit code on Android.");
+                session_set_state(session, STREAMING_ERROR);
+                goto thread_cleanup;
+            }
+        }
+        if (connection->mode == SCRCPY_ADB_QR) {
+            if (!adb_qr_discover_connect_endpoint(session, connection->pair_endpoint,
+                                                  connection->serial, sizeof(connection->serial))) {
+                if (session->interrupted) goto thread_cleanup;
+                session_interrupt(session, false, STREAMING_INTERRUPT_ERROR);
+                streaming_error(session, GS_WRONG_STATE,
+                                "Paired, but couldn't find the phone's wireless debugging connection. "
+                                "Keep Wireless debugging enabled and try again.");
+                session_set_state(session, STREAMING_ERROR);
+                goto thread_cleanup;
+            }
+        }
+        {
+            snprintf(transport_opts, sizeof(transport_opts), "-s %s", connection->serial);
+            scrcpy_log("Connecting wireless ADB device at %s...", connection->serial);
+            if (!adb_connect_endpoint(adb_opts, connection->serial)) {
+                session_interrupt(session, false, STREAMING_INTERRUPT_ERROR);
+                streaming_error(session, GS_WRONG_STATE,
+                                "Wireless ADB connection failed. Check the phone IP address, connection port and Wi-Fi network.");
+                session_set_state(session, STREAMING_ERROR);
+                goto thread_cleanup;
+            }
+        }
+    }
+
+    // Step 0: Check the selected USB or wireless ADB device.
+    scrcpy_log("Checking for connected ADB device...");
     int usb_chk_retries = 15; // Wait up to 15 seconds for a device to be detected
     bool usb_connected = false;
     bool usb_authorized = false;
     
     while (usb_chk_retries > 0 && !session->interrupted) {
-        snprintf(cmd, sizeof(cmd), "%s -d get-state > /tmp/adb_state.txt 2>&1", adb_opts);
+        snprintf(cmd, sizeof(cmd), "%s %s get-state > /tmp/adb_state.txt 2>&1", adb_opts, transport_opts);
         system(cmd);
         
         FILE *sf = fopen("/tmp/adb_state.txt", "r");
@@ -495,7 +759,7 @@ int session_worker(session_t *session) {
                     len--;
                 }
                 
-                scrcpy_log("Wired device check state: %s", state_line);
+                scrcpy_log("ADB device check state: %s", state_line);
                 if (strcmp(state_line, "device") == 0) {
                     usb_connected = true;
                     usb_authorized = true;
@@ -526,7 +790,10 @@ int session_worker(session_t *session) {
 
     if (!usb_connected) {
         session_interrupt(session, false, STREAMING_INTERRUPT_ERROR);
-        streaming_error(session, GS_WRONG_STATE, 
+        if (connection->serial[0]) {
+            streaming_error(session, GS_WRONG_STATE, "Wireless ADB device not available. Check the phone's Wireless debugging screen and connection port.");
+        } else {
+            streaming_error(session, GS_WRONG_STATE,
                         "No USB device detected.\n\n"
                         "Please verify:\n"
                         "1. Connect Android to TV via USB\n"
@@ -536,19 +803,29 @@ int session_worker(session_t *session) {
                         "4. Ensure your android screen is unlocked\n"
                         "5. Accept Android connection prompt\n\n"
                         "Good Luck. Find help on GitHub");
+        }
         session_set_state(session, STREAMING_ERROR);
         goto thread_cleanup;
     }
 
     if (!usb_authorized) {
         session_interrupt(session, false, STREAMING_INTERRUPT_ERROR);
-        streaming_error(session, GS_WRONG_STATE, 
+        streaming_error(session, GS_WRONG_STATE, connection->serial[0] ?
+                        "Wireless ADB device is not authorized. Check the phone's Wireless debugging screen." :
                         "USB device connected but UNAUTHORIZED.\n\n"
                         "Please check your mobile phone's screen and accept the 'Allow USB Debugging' authorization prompt (always allow is recommended).");
         session_set_state(session, STREAMING_ERROR);
         goto thread_cleanup;
     }
-    
+
+    /* Prepare future wireless use, but keep this session on the USB transport. */
+    if (connection->mode == SCRCPY_ADB_USB && !connection->serial[0]) {
+        remember_usb_phone(session, adb_opts);
+        if (session->interrupted) goto thread_cleanup;
+    } else if (connection->mode == SCRCPY_ADB_QR) {
+        remember_wireless_phone(session, adb_opts, connection->serial);
+    }
+
     // Step 1: Push server
     scrcpy_log("Pushing scrcpy-server.jar...");
 #ifdef TARGET_WEBOS
@@ -557,19 +834,19 @@ int session_worker(session_t *session) {
 #else
     const char *scrcpy_jar = "scrcpy-server.jar";
 #endif
-    snprintf(cmd, sizeof(cmd), "%s -d push %s /data/local/tmp/scrcpy-server.jar 2>&1 | tee /tmp/adb_push.log", adb_opts, scrcpy_jar);
+    snprintf(cmd, sizeof(cmd), "%s %s push %s /data/local/tmp/scrcpy-server.jar > /tmp/adb_push.log 2>&1", adb_opts, transport_opts, scrcpy_jar);
     int push_ret = system(cmd);
     scrcpy_log("Push returned: %d", push_ret);
     if (push_ret != 0) {
         session_interrupt(session, false, STREAMING_INTERRUPT_ERROR);
-        streaming_error(session, GS_WRONG_STATE, "Failed to push payload. Make sure USB Debugging is ON and your phone AUTHORIZED the TV. (See /tmp/adb_push.log)");
+        streaming_error(session, GS_WRONG_STATE, "Failed to push scrcpy server to the selected ADB device. See /tmp/adb_push.log.");
         session_set_state(session, STREAMING_ERROR);
         goto thread_cleanup;
     }
 
     // Step 2: Forward port
     scrcpy_log("Forwarding port...");
-    snprintf(cmd, sizeof(cmd), "%s -d forward tcp:27183 localabstract:scrcpy 2>&1 | tee /tmp/adb_forward.log", adb_opts);
+    snprintf(cmd, sizeof(cmd), "%s %s forward tcp:27183 localabstract:scrcpy > /tmp/adb_forward.log 2>&1", adb_opts, transport_opts);
     int forward_ret = system(cmd);
     scrcpy_log("Forward returned: %d", forward_ret);
     if (forward_ret != 0) {
@@ -591,21 +868,37 @@ int session_worker(session_t *session) {
 
         scrcpy_log("Child process constraining max encoder target boundary to: %s", max_size_arg);
 
-        // Child cannot log safely to scrcpy_log if it exits or calls execlp
-        execlp(adb, adb, "-H", "127.0.0.1", "-P", "5037", "-d", "shell", 
-               "CLASSPATH=/data/local/tmp/scrcpy-server.jar", "app_process", "/", 
-               "com.genymobile.scrcpy.Server", "3.1", 
-               "tunnel_forward=true", 
-               "audio=true", 
-               "audio_codec=raw", 
-               "control=false", 
-               "raw_stream=true", 
-               "video_bit_rate=40000000", 
-               "max_fps=60", 
-               "i_frame_interval=2", 
-               max_size_arg, 
-               NULL);
-        exit(1);
+        const char *args[32];
+        int n = 0;
+        args[n++] = adb;
+        args[n++] = "-H";
+        args[n++] = "127.0.0.1";
+        args[n++] = "-P";
+        args[n++] = "5037";
+        if (connection->serial[0]) {
+            args[n++] = "-s";
+            args[n++] = connection->serial;
+        } else {
+            args[n++] = "-d";
+        }
+        args[n++] = "shell";
+        args[n++] = "CLASSPATH=/data/local/tmp/scrcpy-server.jar";
+        args[n++] = "app_process";
+        args[n++] = "/";
+        args[n++] = "com.genymobile.scrcpy.Server";
+        args[n++] = "3.1";
+        args[n++] = "tunnel_forward=true";
+        args[n++] = "audio=true";
+        args[n++] = "audio_codec=raw";
+        args[n++] = "control=false";
+        args[n++] = "raw_stream=true";
+        args[n++] = "video_bit_rate=40000000";
+        args[n++] = "max_fps=60";
+        args[n++] = "i_frame_interval=2";
+        args[n++] = max_size_arg;
+        args[n] = NULL;
+        execvp(adb, (char *const *) args);
+        _exit(1);
     } else if (pid > 0) {
         adb_server_pid = pid;
         scrcpy_log("Parent: scrcpy server process spawned with PID %d", pid);
@@ -696,7 +989,7 @@ int session_worker(session_t *session) {
             .sampleRate = 48000,
             .numOfChannels = 2,
             .samplesPerFrame = 960,
-            .appName = "Moonlight",
+            .appName = "ADB.webOS",
             .streamName = "Streaming"
         };
 
@@ -762,7 +1055,7 @@ thread_cleanup:
         scrcpy_log("Terminating ADB server child PID %d", adb_server_pid);
         kill(adb_server_pid, SIGTERM);
         adb_server_pid = 0;
-        snprintf(cmd, sizeof(cmd), "%s -d forward --remove tcp:27183", adb);
+        snprintf(cmd, sizeof(cmd), "%s %s forward --remove tcp:27183", adb_opts, transport_opts);
         system(cmd);
     }
     if (adb_daemon_pid > 0) {

@@ -81,8 +81,9 @@ lv_obj_t *launcher_win_create(lv_fragment_t *self, lv_obj_t *parent) {
 
     lv_obj_set_layout(welcome_cnt, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(welcome_cnt, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(welcome_cnt, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_flex_align(welcome_cnt, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(welcome_cnt, 0, 0);
+    lv_obj_set_style_pad_right(welcome_cnt, LV_DPX(200), 0);
     lv_obj_set_style_pad_row(welcome_cnt, 0, 0);
 
     // Add a big beautiful looping animated logo directly to welcome_cnt so it flows in flex layout
@@ -111,24 +112,38 @@ lv_obj_t *launcher_win_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_set_flex_align(text_sec, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(text_sec, LV_DPX(20), 0);
     lv_obj_set_style_pad_row(text_sec, LV_DPX(10), 0);
-    lv_obj_set_style_translate_x(text_sec, LV_PCT(-12), 0);
-    lv_obj_set_style_translate_y(text_sec, LV_PCT(-20), 0);
+
 
 
     // Add a styled welcome title (dark text on white bg)
     lv_obj_t *welcome_title = lv_label_create(text_sec);
+    lv_obj_set_width(welcome_title, LV_PCT(100));
     lv_obj_set_style_text_font(welcome_title, lv_theme_get_font_large(detail), 0);
     lv_obj_set_style_text_align(welcome_title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(welcome_title, lv_color_hex(0x2f3237), 0);
-    lv_label_set_text(welcome_title, "Your Android journey starts here.");
+    lv_label_set_text(welcome_title, "Connect your android device.");
 
     // Add a detailed body/guidance text (medium dark text on white bg)
     lv_obj_t *welcome_text = lv_label_create(text_sec);
+    lv_obj_set_width(welcome_text, LV_PCT(100));
+    lv_label_set_long_mode(welcome_text, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(welcome_text, lv_theme_get_font_normal(detail), 0);
     lv_obj_set_style_text_align(welcome_text, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(welcome_text, lv_color_hex(0x555555), 0);
     lv_label_set_text(welcome_text,
-                      "Select 'Start Screencast' on the left menu to begin.");
+                      "Cable: connect your device, select USB, and allow USB debugging.\n"
+                      "Wireless: Available after first USB connection. Alternatively use QR method.\n"
+                      "Keep both devices on the same Wi-Fi. Unavailable phones are dimmed.");
+
+    lv_obj_t *wireless_error = lv_label_create(detail);
+    lv_obj_set_width(wireless_error, LV_PCT(90));
+    lv_label_set_long_mode(wireless_error, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(wireless_error, lv_theme_get_font_normal(detail), 0);
+    lv_obj_set_style_text_align(wireless_error, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(wireless_error, lv_color_hex(0xb00020), 0);
+    lv_obj_center(wireless_error);
+    lv_obj_add_flag(wireless_error, LV_OBJ_FLAG_HIDDEN);
+    controller->wireless_error_label = wireless_error;
 
     controller->welcome_cnt = welcome_cnt;
 
@@ -162,6 +177,7 @@ lv_obj_t *launcher_win_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_set_style_bg_opa(pclist, 0, 0);
 
     lv_obj_set_flex_grow(pclist, 1);
+    lv_obj_add_flag(pclist, LV_OBJ_FLAG_HIDDEN);
 
     // Use list button for normal container
     lv_obj_t *add_btn = lv_list_add_btn(nav, MAT_SYMBOL_ADD_TO_QUEUE, locstr("Add computer"));
@@ -186,12 +202,37 @@ lv_obj_t *launcher_win_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_add_flag(pref_btn, LV_OBJ_FLAG_HIDDEN);
 
 
-    // only two used buttons for now
-    lv_obj_t *scrcpy_btn = lv_list_add_btn(nav, MAT_SYMBOL_PLAY_ARROW, "Start Screencast");
+    lv_obj_t *wireless_list = lv_list_create(nav);
+    lv_obj_set_width(wireless_list, LV_PCT(100));
+    lv_obj_set_flex_grow(wireless_list, 1);
+    lv_obj_set_style_pad_all(wireless_list, 0, 0);
+    lv_obj_set_style_radius(wireless_list, 0, 0);
+    lv_obj_set_style_border_width(wireless_list, 0, 0);
+    lv_obj_set_style_bg_opa(wireless_list, LV_OPA_TRANSP, 0);
+    lv_obj_add_flag(wireless_list, LV_OBJ_FLAG_EVENT_BUBBLE);
+    controller->wireless_list = wireless_list;
+
+    lv_obj_t *connections = lv_list_create(nav);
+    lv_obj_set_width(connections, LV_PCT(100));
+    lv_obj_set_style_pad_all(connections, 0, 0);
+    lv_obj_set_style_radius(connections, 0, 0);
+    lv_obj_set_style_border_width(connections, 0, 0);
+    lv_obj_add_flag(connections, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_t *connections_title = lv_list_add_text(connections, locstr("Connection options"));
+    lv_obj_set_style_text_font(connections_title, lv_theme_get_font_small(connections_title), 0);
+    lv_obj_set_style_pad_left(connections_title, LV_DPX(12), 0);
+
+    lv_obj_t *scrcpy_btn = lv_list_add_btn(connections, MAT_SYMBOL_PLAY_ARROW, "Connect via USB");
     lv_obj_add_style(scrcpy_btn, &controller->nav_menu_style, 0);
     lv_btn_set_icon_font(scrcpy_btn, lv_theme_moonlight_get_iconfont_small(nav));
     lv_btn_set_text_font(scrcpy_btn, lv_theme_get_font_small(nav));
     lv_obj_add_flag(scrcpy_btn, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    lv_obj_t *qr_pair_btn = lv_list_add_btn(connections, MAT_SYMBOL_ADD_TO_QUEUE, "Pair device via QR");
+    lv_obj_add_style(qr_pair_btn, &controller->nav_menu_style, 0);
+    lv_btn_set_icon_font(qr_pair_btn, lv_theme_moonlight_get_iconfont_small(nav));
+    lv_btn_set_text_font(qr_pair_btn, lv_theme_get_font_small(nav));
+    lv_obj_add_flag(qr_pair_btn, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     lv_obj_t *quit_btn = lv_list_add_btn(nav, MAT_SYMBOL_CLOSE, locstr("Quit"));
     lv_obj_add_style(quit_btn, &controller->nav_menu_style, 0);
@@ -207,6 +248,7 @@ lv_obj_t *launcher_win_create(lv_fragment_t *self, lv_obj_t *parent) {
     controller->help_btn = help_btn;
 
     controller->scrcpy_btn = scrcpy_btn;
+    controller->qr_pair_btn = qr_pair_btn;
     controller->quit_btn = quit_btn;
     return win;
 }
@@ -216,7 +258,7 @@ static void detail_group_add(lv_event_t *event) {
     launcher_fragment_t *fragment = lv_event_get_user_data(event);
     apps_fragment_t *apps_fragment = (apps_fragment_t *) lv_fragment_manager_find_by_container(
             fragment->base.child_manager, fragment->detail);
-    if (!apps_fragment) return;
+    if (!apps_fragment || apps_fragment->base.cls != &apps_controller_class) return;
     lv_obj_t *view = apps_fragment->base.obj;
     if (!view) return;
     if (!child || !lv_obj_is_group_def(child)) return;

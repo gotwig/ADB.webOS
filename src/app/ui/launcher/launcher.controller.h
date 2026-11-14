@@ -24,8 +24,11 @@ typedef struct launcher_fragment_t {
     lv_obj_t *nav;
     lv_obj_t *detail;
     lv_obj_t *pclist;
-    lv_obj_t *add_btn, *pref_btn, *help_btn, *quit_btn, *scrcpy_btn;
+    lv_obj_t *wireless_list;
+    struct wireless_discovery_t *wireless_discovery;
+    lv_obj_t *add_btn, *pref_btn, *help_btn, *quit_btn, *scrcpy_btn, *qr_pair_btn;
     lv_obj_t *welcome_cnt;
+    lv_obj_t *wireless_error_label;
     lv_group_t *nav_group, *detail_group;
     lv_style_transition_dsc_t tr_nav;
     lv_style_transition_dsc_t tr_detail;
@@ -46,6 +49,7 @@ typedef struct launcher_fragment_t {
 lv_obj_t *launcher_win_create(lv_fragment_t *self, lv_obj_t *parent);
 
 launcher_fragment_t *launcher_instance();
+void launcher_show_wireless_error(const char *message);
 
 void launcher_select_server(launcher_fragment_t *controller, const uuidstr_t *uuid);
 

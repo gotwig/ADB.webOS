@@ -27,7 +27,7 @@ void app_session_destroy(app_t *app) {
     app->session = NULL;
 }
 
-int app_session_begin_scrcpy(app_t *app) {
+int app_session_begin_scrcpy(app_t *app, const scrcpy_connection_t *connection) {
     if (app->session != NULL) {
         commons_log_error("App", "Session already exists");
         return -1;
@@ -47,6 +47,9 @@ int app_session_begin_scrcpy(app_t *app) {
     session->display_height = app->ui.height;
     session->audio_cap = app->ss4s.audio_cap;
     session->video_cap = app->ss4s.video_cap;
+    if (connection != NULL) {
+        session->scrcpy_connection = *connection;
+    }
     
     // UI might check server for info
     session->server = calloc(1, sizeof(SERVER_DATA));

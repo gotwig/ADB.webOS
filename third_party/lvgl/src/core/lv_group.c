@@ -264,6 +264,19 @@ void lv_group_focus_obj(lv_obj_t * obj)
     }
 }
 
+void lv_group_clear_focus(lv_group_t * group)
+{
+    if(group == NULL || group->obj_focus == NULL) return;
+
+    lv_obj_t * focused = *group->obj_focus;
+    group->editing = 0;
+    lv_res_t res = lv_event_send(focused, LV_EVENT_DEFOCUSED, get_indev(group));
+    if(res != LV_RES_OK) return;
+
+    lv_obj_invalidate(focused);
+    group->obj_focus = NULL;
+}
+
 void lv_group_focus_next(lv_group_t * group)
 {
     bool focus_changed = focus_next_core(group, _lv_ll_get_head, _lv_ll_get_next);

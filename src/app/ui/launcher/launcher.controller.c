@@ -5,6 +5,7 @@
 #include "apps.controller.h"
 #include "launcher.controller.h"
 #include "pair.dialog.h"
+#include "wireless.h"
 #include "server.context_menu.h"
 
 #include "ui/help/help.dialog.h"
@@ -57,6 +58,7 @@ static void open_settings(lv_event_t *event);
 
 static void open_help(lv_event_t *event);
 static void start_scrcpy(lv_event_t *event);
+static void open_qr_pairing(lv_event_t *event);
 
 static void select_pc(launcher_fragment_t *controller, const uuidstr_t *uuid, bool refocus);
 
@@ -98,6 +100,14 @@ static launcher_fragment_t *current_instance = NULL;
 
 launcher_fragment_t *launcher_instance() {
     return current_instance;
+}
+
+void launcher_show_wireless_error(const char *message) {
+    launcher_fragment_t *controller = current_instance;
+    if (!controller || !controller->wireless_error_label) return;
+    lv_label_set_text(controller->wireless_error_label, message ? message : "Wireless connection failed.");
+    lv_obj_clear_flag(controller->wireless_error_label, LV_OBJ_FLAG_HIDDEN);
+    if (controller->welcome_cnt) lv_obj_add_flag(controller->welcome_cnt, LV_OBJ_FLAG_HIDDEN);
 }
 
 void launcher_select_server(launcher_fragment_t *controller, const uuidstr_t *uuid) {
@@ -170,7 +180,9 @@ static void launcher_view_init(lv_fragment_t *self, lv_obj_t *view) {
     lv_obj_add_event_cb(fragment->help_btn, open_help, LV_EVENT_CLICKED, fragment);
     lv_obj_add_event_cb(fragment->quit_btn, app_quit_confirm, LV_EVENT_CLICKED, fragment);
     lv_obj_add_event_cb(fragment->scrcpy_btn, start_scrcpy, LV_EVENT_CLICKED, fragment);
+    lv_obj_add_event_cb(fragment->qr_pair_btn, open_qr_pairing, LV_EVENT_CLICKED, fragment);
 
+    fragment->wireless_discovery = wireless_list_start(fragment);
     update_pclist(fragment);
 
     populate_selected_host(fragment);
@@ -186,7 +198,12 @@ static void launcher_view_init(lv_fragment_t *self, lv_obj_t *view) {
         pcmanager_request_update(pcmanager, &cur->id, NULL, NULL);
     }
     fragment->pane_initialized = true;
-    set_detail_opened(fragment, fragment->detail_opened);
+    if (fragment->first_created && !fragment->launch_params) {
+        set_detail_opened(fragment, false);
+        wireless_list_focus_first(fragment);
+    } else {
+        set_detail_opened(fragment, fragment->detail_opened);
+    }
     pcmanager_auto_discovery_start(pcmanager);
 
     lv_obj_set_style_transition(fragment->detail, &fragment->tr_nav, 0);
@@ -208,6 +225,8 @@ static void launcher_view_destroy(lv_fragment_t *self, lv_obj_t *view) {
     launcher_fragment_t *controller = (launcher_fragment_t *) self;
     LV_UNUSED(view);
     current_instance = NULL;
+    wireless_list_stop(controller->wireless_discovery);
+    controller->wireless_discovery = NULL;
     app_input_set_group(&controller->global->ui.input, NULL);
     pcmanager_auto_discovery_stop(pcmanager);
 
@@ -257,6 +276,7 @@ void on_pc_removed(const uuidstr_t *uuid, void *userdata) {
         lv_obj_t *child = lv_obj_get_child(controller->pclist, i);
         const uuidstr_t *item_id = (const uuidstr_t *) lv_obj_get_user_data(child);
         if (!uuidstr_t_equals_t(uuid, item_id)) { continue; }
+        lv_group_clear_focus(controller->nav_group);
         lv_obj_del(child);
         break;
     }
@@ -525,14 +545,10 @@ static void populate_selected_host(launcher_fragment_t *controller) {
 }
 static void start_scrcpy(lv_event_t *event) {
     launcher_fragment_t *controller = lv_event_get_user_data(event);
-    app_t *app = controller->global;
-    
-    streaming_scene_arg_t args = {
-        .global = app,
-        .app = { .id = -999 }
-    };
-    app_ui_t *ui = &app->ui;
-    lv_fragment_t *fragment = lv_fragment_create(&streaming_controller_class, &args);
-    lv_obj_t *const *container = lv_fragment_get_container(lv_fragment_manager_get_top(ui->fm));
-    lv_fragment_manager_push(ui->fm, fragment, container);
+    screencast_launch(controller->global, NULL);
+}
+
+static void open_qr_pairing(lv_event_t *event) {
+    launcher_fragment_t *controller = lv_event_get_user_data(event);
+    wireless_qr_pair_open(controller->global);
 }

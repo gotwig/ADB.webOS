@@ -8,6 +8,7 @@
 #include "stream/input/session_input.h"
 #include "stream/session.h"
 #include "embed_wrapper.h"
+#include "app_session.h"
 
 typedef struct app_t app_t;
 
@@ -36,6 +37,7 @@ struct session_t {
     SDL_mutex *mutex;
     SDL_Thread *thread;
     SS4S_Player *player;
+    scrcpy_connection_t scrcpy_connection;
 };
 
 void session_set_state(session_t *session, STREAMING_STATE state);

@@ -516,6 +516,7 @@ e.g. "stm32f769xx.h" or "stm32f429xx.h"*/
  *----------*/
 #define LV_USE_FRAGMENT 1
 #define LV_USE_GIF 1
+#define LV_USE_QRCODE 1
 
 #define LV_USE_FS_POSIX 1
 #if LV_USE_FS_POSIX
